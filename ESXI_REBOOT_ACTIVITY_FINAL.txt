@@ -1,0 +1,1738 @@
+################Comparing Pre and Post Reboot csv files###################
+function comparing-pre-post-files{
+param(
+[Parameter(Mandatory=$true)]
+[string] $preVMList,
+[Parameter(Mandatory=$true)]
+[string] $postVMList,
+[string] $LogFile)
+
+# Compare Pre and Post VMList #
+$preVMData = (Get-Content $preVMList)
+$postVMData = (Get-Content $postVMList)
+$vmListCompare = (Compare-Object -ReferenceObject $preVMData -DifferenceObject $postVMData -PassThru)
+if($vmListCompare)
+{
+    $vmDiffList = (Compare-Object -ReferenceObject $preVMData -DifferenceObject $postVMData)
+    $pre=@()
+    $post=@()
+    $final=@()
+    ForEach($vmDiffData in $vmDiffList){
+        $vmInfo = $vmDiffData.InputObject
+        $infoIndicator = $vmDiffData.SideIndicator
+        if($infoIndicator -eq "=>") {
+            $infoType = "PostReboot"
+            $compare=$vmInfo -split ','
+            $Vmname=$compare[0]
+            $Vmname1=$Vmname.Trim('"')
+            $PowerState=$compare[1]
+            $PowerState1=$PowerState.Trim('"')
+            $Final += $Vmname1
+            $post += [pscustomobject] @{
+                Vmname = $Vmname1
+                PowerState = $PowerState1
+            }
+        }
+        elseif($infoIndicator -eq "<=") {
+            $infoType = "PreReboot"
+            $compare=$vmInfo -split ','
+            $Vmname=$compare[0]
+            $Vmname1=$Vmname.Trim('"')
+            $PowerState=$compare[1]
+            $PowerState1=$PowerState.Trim('"')
+            $Final += $Vmname1
+            $pre += [pscustomobject] @{
+                Vmname = $Vmname1
+                PowerState = $PowerState1
+             }
+        }
+    }
+    $preOn = @()
+    $preOff = @()
+    $preavailable = @()
+    $postavailable = @()
+    foreach($fi in $final | select -Unique){
+        $prevms=$pre.Vmname
+        $postvms=$post.Vmname
+        if(($prevms -contains $fi) -and ($postvms -contains $fi)){
+            foreach($pr in $pre){
+                if($pr.Vmname -eq $fi){
+                    $prepowerstate = $pr.PowerState
+                }
+            }
+            foreach($pt in $post){
+                if($pt.Vmname -eq $fi){
+                    $postpowerstate = $pt.PowerState
+                }
+            }
+            if($prepowerstate -ne $postpowerstate){
+                if($prepowerstate -eq "PoweredOn"){
+                    $preOn+= [pscustomobject] @{
+                        Vmname = $fi
+                        PrerebootPowerState = $prepowerstate
+                        PostrebootPowerState = $postpowerstate
+                    }
+                }
+                else{
+                    $preOff += [pscustomobject] @{
+                        Vmname = $fi
+                        PrerebootPowerState = $prepowerstate
+                        PostrebootPowerState = $postpowerstate
+                    }
+                }
+            }
+        }
+        elseif(($prevms -contains $fi) -or ($postvms -contains $fi)){
+            if($prevms -contains $fi){
+                $preavailable += [pscustomobject] @{
+                    Vmname = $fi
+                    PrerebootPowerState = $prepowerstate
+                } 
+            }
+            else{
+                $postavailable += [pscustomobject] @{
+                    Vmname = $fi
+                    PostrebootPowerState = $postpowerstate
+                }
+            }
+        }
+    }
+    if(($preOn -ne $null -and $preOn -ne "" -and $preOn -ne " ") -or ($preOff -ne $null -and $preOff -ne "" -and $preOff -ne " ") -or ($preavailable -ne $null -and $preavailable -ne "" -and $preavailable -ne " ") -or ($postavailable -ne $null -and $postavailable -ne "" -and $postavailable -ne " ")){
+        if($preOn -ne $null -and $preOn -ne "" -and $preOn -ne " "){
+            [string]$Msg = "Difference found in VM(s) Pre and Post Status" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            [string]$Msg = "Below VM(s) are in PoweredOn state before reboot and PoweredOff state after reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            $preOn | ft | out-string | Write-Host 
+            $preOn | Out-File $LogFile -Append
+        }
+        if($preOff -ne $null -and $preOff -ne "" -and $preOff -ne " ") {
+            [string]$Msg = "Difference found in VM(s) Pre and Post Status" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            [string]$Msg = "Below VM(s) are in PoweredOff state before reboot and PoweredOn state after reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            $preOff | ft | out-string | Write-Host 
+            $preOff | Out-File $LogFile -Append 
+        }
+        if($preavailable -ne $null -and $preavailable -ne "" -and $preavailable -ne " "){
+            [string]$Msg = "Below VM(s) are available before reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            $preavailable | ft | Out-String | Write-Host
+            $preavailable | Out-File $LogFile -Append
+        }
+        if($postavailable -ne $null -and $postavailable -ne "" -and $postavailable -ne " "){
+            [string]$Msg = "Below VM(s) are available after reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            $postavailable | ft | Out-String | Write-Host
+            $postavailable | Out-File $LogFile -Append
+        }
+    }
+    else{
+        [string]$Msg = "All VM(s) are in same state as they were before Reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+
+    }
+} else {
+    [string]$Msg = "All VM(s) are in same state as they were before Reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+
+}
+}
+
+#####################Mute Unmute alerts in solarwinds#####################
+function mute-unmute-alerts{
+param(
+[ValidateNotNull()]
+[System.Management.Automation.PSCredential]
+[System.Management.Automation.Credential()]
+$Creds = [System.Management.Automation.PSCredential]::Empty,
+[Parameter(Mandatory=$true)]
+[string] $userinput,
+[Parameter(Mandatory=$true)]
+[string] $readdata,
+[string] $LogFile)
+
+# since the certificate in Orion for SWIS is self-signed we'll need this to ignore it.
+add-type @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class TrustAllCertsPolicy : ICertificatePolicy {​​​
+public bool CheckValidationResult(
+ServicePoint srvPoint, X509Certificate certificate,
+WebRequest request, int certificateProblem) {​​​
+return true;
+}​​​
+}​​​
+"@
+
+[System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$readdata1 = "'" + $readdata + "'"
+# Collecting node caption and nodeid using rest api #
+$baseapiurl = "https://10.155.204.86:17778/SolarWinds/InformationService/v3/Json" # PROD SW API
+#$baseapiurl = "https://ahwswdtxpla100.ds.sjhs.com:17778/SolarWinds/InformationService/v3/Json" # DEV SW API
+$swqueryurl = "$baseapiurl/Query?query=select+nodeid+,+caption+from+orion.nodes+where+caption=$readdata1"
+$nodedata = $(Invoke-WebRequest -Uri "$swqueryurl" -Credential $Creds -UseBasicParsing -Method Get -ContentType "application/json") 2>&1
+If($nodedata) {
+    $errorcode=$nodedata.Exception.Response.StatusCode.value__
+    $errormessage=$nodedata.Exception.Message
+    if(($errorcode -eq 401) -or ($errorcode -eq 403)){
+        [string]$Msg = "Failed to connect to solarwinds because of invalid credentials" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        $muteunmuteout = "NOTOK"
+    }
+    elseif(($nodedata.StatusCode -eq 200) -and ($nodedata.StatusDescription -eq "OK")){
+        $nodedata1=($nodedata | ConvertFrom-Json).results
+        $getnodeId = $null
+        if($nodedata1.caption -eq "$readdata"){
+            $getnodeId=$nodedata1.nodeid
+            If($getnodeId)
+            {
+                # fetch uri
+                $swqueryforuri = "$baseapiurl/Query?query=select+uri+from+orion.nodes+where+nodeid=$getnodeId"
+                $nodeuridata = (Invoke-WebRequest -Uri "$swqueryforuri" -Credential $Creds -UseBasicParsing  -Method Get -ContentType "applicaiton/json")
+                $swisuri = ($nodeuridata | ConvertFrom-Json).results.uri
+                $mutejsondata = "[[`"$swisuri`"]]"
+                if($userinput -eq "mute"){
+                    $mutealertsuri = "$baseapiurl/Invoke/Orion.AlertSuppression/SuppressAlerts"
+                    # Updating the Environment #
+                    $muteAlert= (Invoke-WebRequest -Uri "$mutealertsuri" -Credential $Creds -UseBasicParsing  -Method Post -Body $mutejsondata -ContentType application/json)
+                    [string]$Msg = "Muting the alerts for host $readdata in solarwinds" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                    If(($muteAlert.StatusCode -eq "200") -and ($muteAlert.StatusDescription -eq "OK"))
+                    {
+                        $msg = "$readdata - muted successfully"
+                        [string]$Msg = "$msg" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $resultData = "$getnodeId,$readdata,muted"
+                        [string]$Msg = "$resultData" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $muteunmuteout = "OK"
+                    } 
+                    else {
+                        $msg = "$readdata - mute failed"
+                        [string]$Msg = "$msg" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $resultData = "$getnodeId,$readdata,mute failed"
+                        [string]$Msg = "$resultData" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $muteunmuteout = "NOTOK"
+                    }
+                }
+                elseif($userinput -eq "unmute"){
+                    $unmutealertsuri = "$baseapiurl/Invoke/Orion.AlertSuppression/ResumeAlerts"
+                    # Updating the Environment #
+                    $unmuteAlert= (Invoke-WebRequest -Uri "$unmutealertsuri" -Credential $Creds -UseBasicParsing  -Method Post -Body $mutejsondata -ContentType application/json)
+                    [string]$Msg = "Unmuting the alerts for host $readdata in solarwinds" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                    If(($unmuteAlert.StatusCode -eq "200") -and ($unmuteAlert.StatusDescription -eq "OK"))
+                    {
+                        $msg = "$readdata - unmuted successfully"
+                        [string]$Msg = "$msg" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $resultData = "$getnodeId,$readdata,unmuted"
+                        [string]$Msg = "$resultData" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $muteunmuteout = "OK"
+                     } else {
+                        $msg = "$readdata - unmute failed"
+                        [string]$Msg = "$msg" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $resultData = "$getnodeId,$readdata,unmute failed"
+                        [string]$Msg = "$resultData" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $muteunmuteout = "NOTOK"
+                    }
+                }
+            } 
+            else { 
+                $msg = "Input Node caption $readdata - Not Found"
+                [string]$Msg = "$msg" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                $resultData = "$getnodeId,$readdata,Caption-Not-Found"
+                [string]$Msg = "$resultData" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                $muteunmuteout = "NOTOK"
+            }
+        }    
+    }
+    else{
+        [string]$Msg = "$errormessage" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        $muteunmuteout = "NOTOK"
+    }
+}
+else {
+    [string]$Msg = "Node $readdata data is not collected from solarwinds" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+    $muteunmuteout = "NOTOK"
+}
+return $muteunmuteout
+}
+
+#############Enable rules and PowerOn vms############
+function enable-on {
+param([array] $patharray,
+[string] $LogFile)
+
+foreach($pa in $patharray){
+if($pa -eq $rpath){
+    if(Test-Path $pa){
+        $rdata=Get-content $pa
+        foreach($rd in $rdata){
+            $sd1=set-drsVMHostrule -rule $rd -Enabled:$true -confirm:$false
+            do{
+            $sd2=(Get-DrsVMHostRule -Name $rd | Select-Object -Property Enabled).Enabled
+            }
+            until($sd2 -eq $true)
+            [string]$Msg = "Rule $rd is Enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+        }
+    }
+}
+elseif($pa -eq $vapath){
+    if(Test-Path $pa){
+        $vadata=Get-content $pa  
+        foreach($vad in $vadata){
+            $envmcheck = Get-VM -Name $vad -ErrorAction SilentlyContinue
+            if($envmcheck -ne $null){
+                $sv2=Start-VM -VM $vad -Confirm:$false
+                do{
+                    $sv21=(Get-VM -Name $vad | select-object PowerState).PowerState
+                 }
+                 until($sv21 -eq "PoweredOn")
+                 [string]$Msg = "vm $vad PoweredOn successfully" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+            }
+        }
+    }
+}
+elseif($pa -eq $vrpath){
+    if(Test-Path $pa){
+        $vrdata=Get-content $pa  
+        foreach($vrd in $vrdata){
+            $envmcheck1 = Get-VM -Name $vrd -ErrorAction SilentlyContinue
+            if($envmcheck1 -ne $null){
+                $sv3=Start-VM -VM $vrd -Confirm:$false
+                do{
+                    $sv31=(Get-VM -Name $vrd |select-object PowerState).PowerState
+                 }
+                 until($sv31 -eq "PoweredOn")
+                 [string]$Msg = "vm $vrd PoweredOn successfully" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+            }
+        }
+    }
+}
+elseif($pa -eq $mmpath){
+    if(Test-Path $pa){
+        $mmdata=Get-content $pa  
+        foreach($mmd in $mmdata){
+            $envmcheck2 = Get-VM -Name $mmd -ErrorAction SilentlyContinue
+            if($envmcheck2 -ne $null){
+                if((Get-VM -Name $mmd).PowerState -eq "PoweredOff"){
+                    $sv4=Start-VM -VM $mmd -Confirm:$false
+                    do{
+                        $sv41=(Get-VM -Name $mmd |select-object PowerState).PowerState
+                    }
+                    until($sv41 -eq "PoweredOn")
+                    [string]$Msg = "vm $mmd PoweredOn successfully" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                }
+                else{
+                    [string]$Msg = "Initiated shutdown for vm $mmd but doesn't go down within 15 minutes timespan.Please check.." ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                }
+            }
+        }
+    }
+}
+}
+foreach($ph in $patharray){
+    if(Test-Path -Path $ph){
+        Remove-Item -Path $ph
+    }
+}
+}
+
+#######################################################
+function check-enable-on {
+param([array] $arraypath,
+[string] $LogFile)
+
+foreach($ap in $arraypath){
+    if(Test-Path $ap){
+        if(![String]::IsNullOrWhiteSpace((Get-content $ap))){
+            $aout = "OK"
+                break
+        }
+    }
+}
+if($aout -eq "OK"){
+    $en=enable-on -patharray $arraypath -LogFile $LogFile
+}
+else{
+    [string]$Msg = "No rule(s) disabled and no vm(s) PoweredOff under the host $vmHostname" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+}
+}
+
+################Take Post reboot backup of vms info########################
+function compare-files{
+param(
+[string] $cn,
+[string] $preVMList,
+[string] $postVMList,
+[string] $LogFile)
+
+[string]$Msg = "Taking backup of vm(s) info after performing reboot activity.Please wait.." ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+$postreboot=pre-post-checking -hostCluster $cn -Outfile $postVMList
+if($postreboot -eq "OK"){
+    [string]$Msg = "Successfully have the backup of vm(s) info after performing reboot activity in the path $postVMList" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+    $compare=comparing-pre-post-files -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+}   
+}
+
+##############Disable validations HA and DRS######################
+function disable-hadrs{
+param(
+[string] $cn,
+[string] $hadrsinput,
+[string] $LogFile)
+
+if($hadrsinput -ne $null -and $hadrsinput -ne "" -and $hadrsinput -ne " "){
+    if($hadrsinput -eq "drs"){
+        $disable=Set-Cluster -Cluster $cn -DrsEnabled:$false -confirm:$false
+        $drsstate=(Get-Cluster -Name $cn).DrsEnabled
+        if($drsstate -eq $false){
+            [string]$Msg = "DRS of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+        }
+        else{
+            [string]$Msg = "DRS of cluster $cn not disabled.Please check.." ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        }
+    }
+    elseif($hadrsinput -eq "ha"){
+        $disable=Set-Cluster -Cluster $cn -HAEnabled:$false -confirm:$false
+        $hastate=(Get-Cluster -Name $cn).HAEnabled
+        if($hastate -eq $false){
+            [string]$Msg = "HA of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile  
+        }
+        else{
+            [string]$Msg = "HA of cluster $cn not disabled.Please check.." ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        }
+    }
+    elseif($hadrsinput -eq "both"){
+        $disable=Set-Cluster -Cluster $cn -DrsEnabled:$false -HAEnabled:$false -confirm:$false
+        $drsstate=(Get-Cluster -Name $cn).DrsEnabled
+        $hastate=(Get-Cluster -Name $cn).HAEnabled
+        if($drsstate -eq $false -and $hastate -eq $false){
+            [string]$Msg = "Both HA and DRS of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile     
+        }
+        elseif($drsstate -eq $false -or $hastate -eq $false){
+            if($drsstate -eq $false){
+                [string]$Msg = "HA of cluster $cn not disabled.Please check.." ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile   
+            }
+            else{
+                [string]$Msg = "DRS of cluster $cn not disabled.Please check.." ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+            }
+        }
+        else{
+            [string]$Msg = "Both HA and DRS of cluster $cn not disabled.Please check.." ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        }
+    }
+}
+}
+
+######################################
+function hadrs-enable-unmute-compare{
+param(
+[string] $eninput,
+[string] $muinput,
+[string] $hdinput,
+[string] $compareinput,
+[array] $arraypath,
+[ValidateNotNull()]
+[System.Management.Automation.PSCredential]
+[System.Management.Automation.Credential()]
+$Creds = [System.Management.Automation.PSCredential]::Empty,
+[string] $cn,
+[string] $vmHostname,
+[string] $hadrsinput,
+[string] $preVMList,
+[string] $postVMList,
+[string] $LogFile)
+
+if($eninput -eq "enable"){
+    $enablecheck=check-enable-on -arraypath $arraypath -LogFile $LogFile
+}
+if(($muinput -eq "mute") -or ($muinput -eq "unmute")){
+    $muteunmutealerts=mute-unmute-alerts -Creds $Creds -userinput $muinput -readdata $vmHostname -LogFile $LogFile
+    if($muteunmutealerts -eq "NOTOK"){
+        $disabledrs=disable-hadrs -cn $cn -hadrsinput $hadrsinput -LogFile $LogFile
+        $quit=compare-files -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile 
+        Exit  
+    }
+}
+if($hdinput -eq "disable"){
+    $disabledrs=disable-hadrs -cn $cn -hadrsinput $hadrsinput -LogFile $LogFile  
+}
+if($compareinput -eq "compare"){
+    $quit=compare-files -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+}
+}
+
+#####################################################################
+function affinity-rdm-check-choice1{
+param(
+[Parameter(Mandatory=$true)]
+[string] $vCenter1,
+[ValidateNotNull()]
+[System.Management.Automation.PSCredential]
+[System.Management.Automation.Credential()]
+$Credential = [System.Management.Automation.PSCredential]::Empty,
+[Parameter(Mandatory=$true)]
+[array] $resultarray,
+[Parameter(Mandatory=$true)]
+[array] $inputarray,
+[string] $inp,
+[Parameter(Mandatory=$true)]
+[string] $path,
+[string] $path1,
+[string] $LogFile)
+
+$mm="C:\ESXI_REBOOT_ACTIVITY\ESXIFILES\VmswithMm.txt"
+$vCenterConnect1 = (Connect-VIServer $vCenter1 -Credential $Credential -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+$vCenterConnectStatus1 = $vCenterConnect1.IsConnected
+If($vCenterConnectStatus1 -eq "True") {
+    foreach($inputarr in $inputarray){
+        if($inputarr -eq "all"){
+            foreach($result in $resultarray){
+                $ou = $result.Vmname
+                $arcvmcheck = Get-VM -Name $ou -ErrorAction SilentlyContinue
+                if($arcvmcheck -ne $null){
+                    if($inp -eq "job"){
+                        $PowerState = $result.PowerState.value
+                    }
+                    else{
+                        $PowerState = $result.PowerState
+                    }
+                    if($PowerState -eq "PoweredOn"){
+                        if(Get-VM -Name $ou | Where{$_.Guest.State -eq "running"}){
+                            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools installed on vm $ou proceeding with graceful shutdown"
+                            [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools installed on vm $ou proceeding with graceful shutdown" | Out-File $LogFile -Append
+                            $svsh=Get-VM -Name $ou | Shutdown-VMGuest -Confirm:$false 
+                            if($path -eq $mm){
+                                $ou | Out-File $path1 -Append
+                            }
+                        }
+                        else{
+                            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools not installed on vm $ou proceeding with forceful shutdown"
+                            [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools not installed on vm $ou proceeding with forceful shutdown" | Out-File $LogFile -Append
+                            $sv=Get-VM -Name $ou | Stop-VM -Confirm:$false
+                            if($path -eq $mm){
+                                $ou | Out-File $path1 -Append
+                            }
+                        }  
+                        do{
+                            $svstate=(Get-VM -Name $ou |select-object PowerState).PowerState
+                        }
+                        until($svstate -eq "PoweredOff")
+                            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $ou PoweredOff successfully" -ForegroundColor Green
+                            [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $ou PoweredOff successfully" | Out-File $LogFile -Append
+                            $ou | Out-File $path -Append
+                    }
+                    else{
+                        Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $ou already PoweredOff"
+                        [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $ou already PoweredOff" | Out-File $LogFile -Append
+                    }
+                }
+            }
+        }
+        elseif([int]$inputarr -eq 0){
+            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Proceeding without PoweredOff vm(s)"
+            [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Proceeding without PoweredOff vm(s)" | Out-File $LogFile -Append
+        }
+        else{
+            $arr=[int[]]($inputarr -split ',')
+            foreach($result in $resultarray){
+                $rvmname=$result.Vmname
+                $arcvmcheck1 = Get-VM -Name $rvmname -ErrorAction SilentlyContinue
+                if($arcvmcheck1 -ne $null){
+                    if($inp -eq "job"){
+                        $PowerState = $result.PowerState.value
+                    }
+                    else{
+                        $PowerState = $result.PowerState
+                    }
+                    foreach($a in $arr){
+                        if($a -eq $result.Choice){
+                            if($PowerState -eq "PoweredOn"){
+                                if(Get-VM -Name $rvmname | Where{$_.Guest.State -eq "running"}){
+                                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools installed on vm $rvmname proceeding with graceful shutdown"
+                                    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools installed on vm $rvmname proceeding with graceful shutdown" | Out-File $LogFile -Append
+                                    $svsh=Get-VM -Name $rvmname | Shutdown-VMGuest -Confirm:$false
+                                    if($path -eq $mm){
+                                        $rvmname | Out-File $path1 -Append
+                                    }
+                                }
+                                else{
+                                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools not installed on vm $rvmname proceeding with forceful shutdown"
+                                    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Vmware tools not installed on vm $rvmname proceeding with forceful shutdown" | Out-File $LogFile -Append
+                                    $sv=Get-VM -Name $rvmname | Stop-VM -Confirm:$false
+                                    if($path -eq $mm){
+                                        $rvmname | Out-File $path1 -Append
+                                    }
+                                }
+                                do{
+                                    $svstate=(Get-VM -Name $rvmname |select-object PowerState).PowerState
+                                }
+                                until($svstate -eq "PoweredOff")
+                                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $rvmname PoweredOff successfully" -ForegroundColor Green
+                                    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $rvmname PoweredOff successfully" | Out-File $LogFile -Append
+                                    $rvmname | Out-File $path -Append
+                            }
+                            else{
+                                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $rvmname already Poweredoff"
+                                [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $rvmname already Poweredoff" | Out-File $LogFile -Append
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+else{
+    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Failed to connect to the vcenter $vCenter1" -ForegroundColor Red
+    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Failed to connect to the vcenter $vCenter1" | Out-File $LogFile -Append
+}
+}
+
+###################################################################
+function affinity-rdm-check-choice{
+param(
+[Parameter(Mandatory=$true)]
+[array] $resultarray,
+[string] $LogFile)
+
+Write-host "
+#####################################################################
+#INPUT REQUIRED                                                     #
+#If you want to poweredOff all vms provide input as ex: all         #
+#If you want to powseredoff only one vm provide input as ex: 1      #
+#If you want to poweredoff multiple vms provide input as ex: 1,2,3  #
+#If you don't want to poweredoff any vm provide input as ex: 0      #
+#If you want to abort/exit the script provide input as ex: q        #
+#####################################################################
+" -ForegroundColor Yellow
+$incre=1
+[string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Which vm(s) do you want to PoweredOff? : ex(all or 1 or 1,2,3,4 or 0 or q) : " | Out-File $LogFile -Append
+while($incre){
+    $intarray=@()
+    $stringarray=@()
+    $intarrayzero=@()
+    $in1=$(Write-host "Which vm(s) do you want to PoweredOff? : ex(all or 1 or 1,2,3,4 or 0 or q) : " -ForegroundColor Magenta -NoNewLine; Read-Host)
+    if($in1 -eq "q"){
+        $returnout=$in1
+        break
+    }
+    elseif($in1 -eq "all"){
+        $returnout=$in1
+        break
+    }
+    else{
+        [array]$arrayin=($in1 -split ',')
+        foreach($arrin in $arrayin){
+            if($arrin -match "^\d+$"){
+                if($arrin -eq 0){
+                    [int]$a0=$arrin
+                    $intarrayzero += $a0
+                }
+                else{
+                    [int]$a1=$arrin
+                    $intarray += $a1 
+                } 
+            }
+            else{
+                $stringarray += $arrin
+            }
+    
+        }
+        if(($intarray.Count -gt 0) -and ($stringarray -ne $null -and $stringarray -ne "" -and $stringarray -ne " ") -and ($intarrayzero.Count -gt 0)){
+            Write-host "Entered input is invalid.Please enter correct input.."
+            $incre ++
+            continue
+        }
+        elseif(($intarray.Count -gt 0) -and ($stringarray -ne $null -and $stringarray -ne "" -and $stringarray -ne " ")){
+            Write-host "Entered input is invalid.Please enter correct input.."
+            $incre ++
+            continue
+        }
+        elseif(($intarray.Count -gt 0) -and ($intarrayzero.Count -gt 0)){
+            Write-host "Entered input is invalid.Please enter correct input.."
+            $incre ++
+            continue
+        }
+        elseif(($stringarray -ne $null -and $stringarray -ne "" -and $stringarray -ne " ") -and ($intarrayzero.Count -gt 0)){
+            Write-host "Entered input is invalid.Please enter correct input.."
+            $incre ++
+            continue   
+        }
+        elseif(($intarray.Count -gt 0) -or ($stringarray -ne $null -and $stringarray -ne "" -and $stringarray -ne " ") -or ($intarrayzero.Count -gt 0)){
+            if($intarray.Count -gt 0){
+                $resultarraychoice=$resultarray.Choice
+                $intarrayunique=$intarray | select -Unique
+                $intarraypre=@()
+                $intarrayother=@()
+                foreach($intarr in $intarrayunique){
+                    if($resultarraychoice -contains $intarr){
+                        $intarraypre += $intarr
+                    }
+                    else{
+                        $intarrayother += $intarr
+                    }
+                }
+                if(($intarraypre.Count -gt 0) -and ($intarrayother.Count -gt 0)){
+                    Write-host "Entered input is invalid.Please enter correct input.."
+                    $incre ++
+                    continue
+                }
+                elseif(($intarraypre.Count -gt 0) -or ($intarrayother.Count -gt 0)){
+                    if(($intarraypre.Count -gt 0)){ 
+                        $returnout=$intarraypre
+                        break
+                    }
+                    else{
+                        Write-host "Entered input is invalid.Please enter correct input.."
+                        $incre ++
+                        continue
+                    } 
+                }
+            }  
+            elseif($stringarray -ne $null -and $stringarray -ne "" -and $stringarray -ne " "){
+                Write-host "Entered input is invalid.Please enter correct input.."
+                $incre ++
+                continue    
+            } 
+            else{
+                $intarrayzerounique=$intarrayzero | select -Unique
+                $intarrayzero1=@()
+                    foreach($intarrzero in $intarrayzerounique){
+                        $intarrayzero1 += $intarrzero
+                    }
+                    if($intarrayzero1.Count -gt 0){
+                        $returnout=$intarrayzero1
+                        break
+                    }
+            }
+        }
+        else{
+            Write-host "Entered input is empty.Please enter correct input.."
+            $incre ++
+            continue
+        }
+    }
+}
+return $returnout
+}
+
+################ popup ###################
+function checking {
+param(
+[Parameter(Mandatory=$true)]
+[string] $body1)
+
+Add-Type -AssemblyName PresentationCore,PresentationFramework
+$ButtonType = [System.Windows.MessageBoxButton]::OK
+$MessageboxTitle = "Please check and resolve the issue"
+$Messageboxbody = "$body1"
+$MessageIcon = [System.Windows.MessageBoxImage]::Warning
+[System.Windows.MessageBox]::Show($Messageboxbody,$MessageboxTitle,$ButtonType,$messageicon)
+}
+
+############Cancel mm task#####################
+function cancel-task{
+param([string] $vmHostname)
+
+$taskName = 'EnterMaintenanceMode_Task'
+$hostname = $vmhostname
+$taskMgr = Get-View TaskManager
+if($taskMgr.RecentTask){
+    $task = Get-View -Id $taskMgr.RecentTask | where {$_.Info.Name -eq $taskName -and $_.Info.EntityName -eq $hostname -and 'queued','running' -contains $_.Info.State -and 'False' -contains $_.Info.Cancelled -and $_.Info.Cancelable}
+    $task.CancelTask()
+}
+return "OK"
+}
+
+###################### Host Reboot ################
+function host-reboot {
+param(
+[Parameter(Mandatory=$true)]
+[string] $vCenter1,
+[ValidateNotNull()]
+[System.Management.Automation.PSCredential]
+[System.Management.Automation.Credential()]
+$Creds = [System.Management.Automation.PSCredential]::Empty,
+[Parameter(Mandatory=$true)]
+[string] $cn,
+[Parameter(Mandatory=$true)]
+[string] $vmHostname,
+[Parameter(Mandatory=$true)]
+[string] $rpath,
+[Parameter(Mandatory=$true)]
+[string] $vapath,
+[Parameter(Mandatory=$true)]
+[string] $vrpath,
+[Parameter(Mandatory=$true)]
+[string] $mmpath,
+[Parameter(Mandatory=$true)]
+[string] $mmpath1,
+[Parameter(Mandatory=$true)]
+[string] $preVMList,
+[Parameter(Mandatory=$true)]
+[string] $postVMList,
+[Parameter(Mandatory=$true)]
+[string] $hadrsinput,
+[string] $LogFile)
+
+$arraypath = @($rpath,$vapath,$vrpath,$mmpath,$mmpath1)
+$time="for host $vmHostname to go to Maintenance mode"
+[string]$Msg = "Setting $vmHostname to maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+get-VMHost $vmHostname | set-VMHost -state maintenance -confirm:$false -runasync |out-null
+[string]$Msg = "Waiting $vmHostname to go to maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+$Timer = 0;$i = 1
+$Timer += New-TimeSpan -Minutes 15
+while ( $i -ne $Timer.TotalSeconds) {
+    $Percentage = [math]::Round($i/$Timer.TotalSeconds*100)
+    $TimeDifference = $Timer - (New-TimeSpan -Seconds $i) 
+    Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Timer Progress $Percentage%" -PercentComplete $Percentage
+    if ((get-VMHost $vmHostname).ConnectionState -eq "maintenance") {
+        Write-host "came to maintenance"
+        Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Done" -Completed 
+        $a="OK"
+        break
+    }
+    sleep 1
+    $i++
+}
+if($i -eq $Timer.TotalSeconds){
+    Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Done" -Completed
+}
+
+if($a -eq "OK"){
+    [string]$Msg = "$vmHostname in maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+}
+else{
+    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Please validate your response in popup" -ForegroundColor Cyan
+    $con2 = "Host $vmHostname didn't go to Maintenance Mode since 15 mins please check and resolve issue"
+    $haout=checking -body1 $con2
+    if($haout -eq "OK"){
+        Write-Host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+        $vresult = @()
+        $count5 = 1
+        $vmlists=Get-VMHost -Name $vmHostname | Get-VM | Where {$_.PowerState -eq "PoweredOn"}
+        foreach($vmlist in $vmlists){
+            $vresult += [pscustomobject] @{
+                Choice = $count5
+                Vmname = $vmlist.Name
+                powerState = $vmlist.PowerState
+                Hostname = $vmHostname
+            }
+        $count5 ++
+        }
+        [string]$Msg = "List of vms present in the host $vmHostname which are still in PoweredOn state" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        if($vresult -ne $null -and $vresult -ne "" -and $vresult -ne " "){
+            $vresult | ft | out-string | write-host
+            $vresult | Out-File $LogFile -Append
+            $affchoice2=affinity-rdm-check-choice -resultarray $vresult -LogFile $LogFile
+            if($affchoice2.Count -gt 0){
+                [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $affchoice2 as input" | Out-File $LogFile -Append
+                if($affchoice2 -eq "q"){
+                    $canceltask=cancel-task -vmHostname $vmHostname
+                    if($canceltask -eq "OK"){
+                        [string]$Msg = "Enabling the rule(s) and Powering On the vm(s) before quitting" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                        $quit=hadrs-enable-unmute-compare -eninput "enable" -muinput "unmute" -hdinput "disable" -compareinput "compare" -arraypath $arraypath -Creds $Creds -cn $cn -vmHostname $vmHostname -hadrsinput $hadrsinput -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }   
+                }
+                $job=Start-Job -ScriptBlock ${Function:affinity-rdm-check-choice1} -ArgumentList $vCenter1,$Creds,$vresult,$affchoice2,"job",$mmpath,$mmpath1,$LogFile
+                $Timer = 0;$i = 1
+                $Timer += New-TimeSpan -Minutes 15
+                while ( $i -ne $Timer.TotalSeconds) {
+                    $Percentage = [math]::Round($i/$Timer.TotalSeconds*100)
+                    $TimeDifference = $Timer - (New-TimeSpan -Seconds $i) 
+                    Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Timer Progress $Percentage%" -PercentComplete $Percentage
+                    if ((get-VMHost $vmHostname).ConnectionState -eq "maintenance") {
+                        Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Done" -Completed 
+                        $return="OK"
+                        sleep -Seconds 5
+                        break
+                    }
+                    Receive-Job -Id $job.Id
+                    sleep 1
+                    $i++
+                }
+                Receive-Job -Id $job.Id
+                if($i -eq $Timer.TotalSeconds){
+                    Write-Progress -Activity "Time Remaining $time : $TimeDifference" -Status "Done" -Completed 
+                    if($job.State -eq 'Running'){
+                        Receive-Job -Id $job.Id
+                        Stop-Job -Id $job.Id
+                        Remove-Job -Id $job.Id -Force
+                    }
+                    else{
+                        Receive-Job -Id $job.Id
+                        Remove-Job -Id $job.Id -Force
+                    }
+                }
+                else{
+                    if(Get-Job -Id $job.Id -ErrorAction SilentlyContinue){
+                        Receive-Job -Id $job.Id
+                        Remove-Job -Id $job.Id -Force
+                    }
+                }
+                if((Test-Path -path $mmpath) -and (Test-Path -Path $mmpath1)){
+                    $mmData = (Get-Content $mmpath1)
+                    $mmData1 = (Get-Content $mmpath)
+                    $mmvmListCompare = (Compare-Object -ReferenceObject $mmData -DifferenceObject $mmData1 -PassThru)
+                    if($mmvmListCompare)
+                    {
+                        $mmvmDiffList = (Compare-Object -ReferenceObject $mmData -DifferenceObject $mmData1)
+                        ForEach($mmvmDiffData in $mmvmDiffList){
+                            $mmvmInfo = $mmvmDiffData.InputObject
+                            $mminfoIndicator = $mmvmDiffData.SideIndicator
+                            if($mminfoIndicator -eq "<="){
+                                $revmcheck = Get-VM -Name $mmvmInfo -ErrorAction SilentlyContinue
+                                if($revmcheck -ne $null){
+                                    $mmvmstate=(Get-VM -Name $mmvmInfo).PowerState
+                                    if($mmvmstate -eq "PoweredOff"){
+                                        $logcontent=Get-Content $LogFile -Tail 1
+                                        $containsline=$logcontent | %{$_ -match "vm $mmvmInfo PoweredOff successfully"}
+                                        if($containsline -notcontains $true){
+                                            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $mmvmInfo Poweredoff successfully" -Foregroundcolor Green
+                                            [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $mmvmInfo Poweredoff successfully" | Out-File $LogFile -Append
+                                            $mmvmInfo | Out-File $mmpath -Append
+                                        }
+                                    }
+                                    else{
+                                        Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Initiated shutdown for vm $mmvmInfo but doesn't go down within 15 minutes timespan" -Foregroundcolor Yellow
+                                        [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Initiated shutdown for vm $mmvmInfo but doesn't go down within 15 minutes timespan" | Out-File $LogFile -Append
+                                        $mmvmInfo | Out-File $mmpath -Append
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                elseif(Test-Path -Path $mmpath1){
+                    $mmData = (Get-Content $mmpath1)
+                    foreach($mmda in $mmData){
+                        $revmcheck1 = Get-VM -Name $mmda -ErrorAction SilentlyContinue
+                        if($revmcheck1 -ne $null){
+                            $mmvmstate=(Get-VM -Name $mmda).PowerState
+                            if($mmvmstate -eq "PoweredOff"){
+                                $logcontent=Get-Content $LogFile -Tail 1
+                                $containsline=$logcontent | %{$_ -match "vm $mmda PoweredOff successfully"}
+                                if($containsline -notcontains $true){
+                                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $mmda Poweredoff successfully" -Foregroundcolor Green
+                                    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - vm $mmda Poweredoff successfully" | Out-File $LogFile -Append
+                                    $mmda | Out-File $mmpath -Append
+                                }
+                            }
+                            else{
+                                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Initiated shutdown for vm $mmda but doesn't go down within 15 minutes timespan" -Foregroundcolor Yellow
+                                [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Initiated shutdown for vm $mmda but doesn't go down within 15 minutes timespan" | Out-File $LogFile -Append
+                                $mmda | Out-File $mmpath -Append
+                            }
+                        }   
+                    }  
+                }
+                $var1=Get-VMHost -Name $vmHostname | Get-VM | ?{$_.PowerState -eq "PoweredOn"}
+                if($var1 -ne $null -and $var1 -ne "" -and $var1 -ne " "){
+                    [string]$Msg = "Waited too long for maintenance.. quiting!" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                    $canceltask=cancel-task -vmHostname $vmHostname
+                    if($canceltask -eq "OK"){
+                        [string]$Msg = "Enabling the rule(s) and Powering On the vm(s) before quitting" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                        $quit=hadrs-enable-unmute-compare -eninput "enable" -muinput "unmute" -hdinput "disable" -compareinput "compare" -arraypath $arraypath -Creds $Creds -cn $cn -vmHostname $vmHostname -hadrsinput $hadrsinput -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }
+                }
+                else{
+                    do{
+                        $var1=(Get-VMHost $vmHostname | Select-Object ConnectionState).ConnectionState
+                    }
+                    until($var1 -eq "maintenance")
+                    [string]$Msg = "$vmHostname in maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                }
+            }
+        }
+        else{
+            [string]$Msg = "No vm(s) in PoweredOn state under the host $vmHostname" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            do{
+                $var1=(Get-VMHost $vmHostname | Select-Object ConnectionState).ConnectionState
+            }
+            until($var1 -eq "maintenance")
+            [string]$Msg = "$vmHostname in maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+        }
+    }
+}
+
+############## REBOOTING HOST ########################
+[string]$Msg = "Rebooting $vmHostname" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+if ((get-VMHost $vmHostname).ConnectionState -eq "Maintenance") {
+get-VMHost $vmHostname | restart-VMHost -confirm:$false -force | out-null
+[string]$Msg = "Waiting $vmHostname to go to NotResponding mode" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+$TimeStart = Get-Date
+$TimeEnd = $timeStart.addminutes(10)
+do{
+$VmHoststate= (Get-VMHost $vmHostname | Select-Object ConnectionState).ConnectionState
+$TimeNow = Get-Date
+     if ($TimeNow -ge $TimeEnd) {
+        [string]$Msg = "Host $vmHostname is not in notresponding mode since 10 mins please check" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        $TimeStart = Get-Date
+        $TimeEnd = $timeStart.addminutes(10)
+     }
+}
+until($VmHoststate -eq "NotResponding")
+[string]$Msg = "$vmHostname is in NotResponding mode" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+}
+
+[string]$Msg = "Waiting $vmHostname back maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+$TimeStart = Get-Date
+$TimeEnd = $timeStart.addminutes(10)
+do{
+$VmHoststate= (Get-VMHost $vmHostname | Select-Object ConnectionState).ConnectionState
+$TimeNow = Get-Date
+     if ($TimeNow -ge $TimeEnd) {
+        [string]$Msg = "Host $vmHostname is not in maintenance mode since 10 mins please check" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        $TimeStart = Get-Date
+        $TimeEnd = $timeStart.addminutes(10)
+     }
+sleep 1
+}
+until($VmHoststate -eq "Maintenance")
+[string]$Msg = "$vmHostname is up and in maintenance mode" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+
+############# EXIT MAINTENANCE ################
+[string]$Msg = "Setting $vmHostname back online" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+get-VMHost $vmHostname | set-VMHost -state connected -confirm:$false | out-null
+do{
+$VmHoststate= (Get-VMHost $vmHostname | Select-Object ConnectionState).ConnectionState
+}
+until($VmHoststate -eq "Connected")
+[string]$Msg = "$vmHostname is up and connected" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+[string]$Msg = "Enabling the rule(s) and Powering On the vm(s) after successfull reboot" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+$quit=hadrs-enable-unmute-compare -eninput "enable" -muinput "unmute" -arraypath $arraypath -Creds $Creds -cn $cn -vmHostname $vmHostname -hadrsinput $hadrsinput -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+}
+
+################Choosing Y/N options#############
+function yes-or-no-options{
+param(
+[Parameter(Mandatory=$true)]
+[string] $read,
+[string] $rule,
+[string] $Logfile)
+
+if($read -eq "disable"){
+Write-host "
+#####################################################################
+#INPUT REQUIRED                                                     #
+#If you want to disable the rule provide input as ex: y             #
+#If you don't want to disable the rule provide input as ex: n       #
+#If you want to abort/exit the script provide input as ex: q        #
+#####################################################################
+" -ForegroundColor Yellow
+}
+elseif($read -eq "proceed"){
+Write-host "
+#####################################################################
+#INPUT REQUIRED                                                     #
+#If you want to proceed with next host provide input as ex: y       #
+#If you don't want to proceed with next host provide input as ex: n #
+#If you want to abort/exit the script provide input as ex: q        #
+#####################################################################
+" -ForegroundColor Yellow
+}
+$incre2=1
+if($read -eq "disable"){
+    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Rule $rule is enabled. Do you want to disable? [y or n or q] : " | Out-File $Logfile -Append
+}
+elseif($read -eq "proceed"){
+    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Do you want to proceed with next host ? [y or n or q] : " | Out-File $Logfile -Append
+}
+while($incre2){
+    if($read -eq "disable"){
+        $option=$(Write-Host "Rule $rule is enabled. Do you want to disable? [y or n or q] : " -ForegroundColor Magenta -NoNewLine; Read-Host)
+    }
+    elseif($read -eq "proceed"){
+        $option=$(Write-Host "Do you want to proceed with next host ? [y or n or q] : "  -ForegroundColor Magenta -NoNewLine; Read-Host)
+    }
+    if($option -eq "q"){
+        $returnout2=$option
+        break
+    }
+    elseif($option -eq "y"){
+        $returnout2=$option
+        break
+    }
+    elseif($option -eq "n"){
+        $returnout2=$option
+        break
+    }
+    else{
+        if($option -match "^\d+$"){
+            Write-host "Entered input is invalid.Please enter the correct input.."
+        }
+        else{
+            if($option -ne $null -and $option -ne "" -and $option -ne " "){
+                Write-host "Entered input is invalid.Please enter the correct input.."
+            }
+            else{
+                Write-host "Entered input is empty.Please enter the correct input.."
+            }
+        }
+        $incre2 ++
+        continue
+    }
+    
+}
+return $returnout2
+}
+
+###################### Affinity and RDM check ##################
+function affinity-rdm-check{
+param(
+[Parameter(Mandatory=$true)]
+[string] $vCenter1,
+[ValidateNotNull()]
+[System.Management.Automation.PSCredential]
+[System.Management.Automation.Credential()]
+$Creds = [System.Management.Automation.PSCredential]::Empty,
+[Parameter(Mandatory=$true)]
+[string] $cluname,
+[Parameter(Mandatory=$true)]
+[string] $hname,
+[Parameter(Mandatory=$true)]
+[string] $rpath,
+[Parameter(Mandatory=$true)]
+[string] $vapath,
+[Parameter(Mandatory=$true)]
+[string] $vrpath,
+[Parameter(Mandatory=$true)]
+[string] $preVMList,
+[Parameter(Mandatory=$true)]
+[string] $postVMList,
+[Parameter(Mandatory=$true)]
+[string] $hadrsinput,
+[string] $LogFile)
+
+$arraypath = @($rpath,$vapath,$vrpath)
+#########################Rules##############################
+$rules = get-cluster -Name $cluname | Get-DrsVMHostrule 
+$count2 = 1
+foreach($rule in $rules){
+$vms = (Get-DRSCLusterGroup -Type VMGroup -Name $rule.VMGroup | select -ExpandProperty Member)
+$hos = (Get-DRSCLusterGroup -Type VMHostGroup -Name $rule.VMHostGroup | select -ExpandProperty Member)
+foreach($hosname in $hos.Name){
+    if($hosname -eq $hname){
+        $vmnames=$vms.Name -join','
+        $hostnames=$hos.Name -join ','
+        [string]$Msg = "*******************************************" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        [string]$Msg = "Rule defined on the host $hname" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        [string]$Msg = "Rule:$count2" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $rulename=$rule.Name
+        [string]$Msg = "RuleName :- $rulename" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $rulevmgroup=$rule.VMGroup
+        [string]$Msg = "VMGroupName :- $rulevmgroup :- $vmnames" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $rulevmhostgroup=$rule.VMHostGroup
+        [string]$Msg = "VMHostGroupName :- $rulevmhostgroup :- $hostnames" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $ruletype=$rule.Type
+        [string]$Msg = "RuleType :- Run VMS on Hosts ($ruletype)" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $ruleenabled=$rule.Enabled
+        [string]$Msg = "Enabled :- $ruleenabled" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        $count3 = 1
+        $res=@()
+        foreach($vm in $vms.Name){
+            $arvmcheck = Get-VM -Name $vm -ErrorAction SilentlyContinue
+            if($arvmcheck -ne $null){
+                $vmh = (get-VMhost -VM $vm).Name
+                $vmst = (get-VM -Name $vm).PowerState
+                if($vmh -eq $hname){
+                    $res += [pscustomobject] @{
+                            Choice = $count3
+                            Vmname = $vm
+                            PowerState = $vmst
+                            Hostname = $vmh
+                    }
+                    $count3 ++
+                }
+            }
+        }
+        [string]$Msg = "Summary:-" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        [string]$Msg = "List of vms residing under the host $hname with rule $rulename" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        if($res -ne $null -and $res -ne "" -and $res -ne " "){
+            $res | ft | out-string | write-host
+            $res | Out-File $LogFile -Append
+        }
+        else{
+            Write-host ""
+            [string]$Msg = "No vm(s) on the host $hname under the rule $ru" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+        }
+        $ru = $rule.Name
+        if($rule.Enabled -eq $true){
+            $yorn=yes-or-no-options -read "disable" -rule $ru -Logfile $LogFile
+                if($yorn -ne $null -and $yorn -ne "" -and $yorn -ne " "){
+                    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $yorn as input" | Out-File $LogFile -Append
+                    if($yorn -eq "q"){
+                        [string]$Msg = "Enabling the rule(s) and Powering On the vm(s) before quitting" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile  
+                        $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -eninput "enable" -muinput "unmute" -arraypath $arraypath -Creds $Creds -cn $cluname -vmHostname $hname -compareinput "compare" -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }
+                    elseif($yorn -eq "Y"){
+                        $sd=set-drsVMHostrule -rule $ru -Enabled:$false -confirm:$false
+                        do{
+                        $sd1=(Get-DrsVMHostRule -name $ru | Select-Object -Property Enabled).Enabled
+                        }
+                        until($sd1 -eq $false)
+                        [string]$Msg = "Rule $ru is Disabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $ru | Out-File $rpath -Append
+                    }
+                    elseif($yorn -eq "N"){
+                       [string]$Msg = "Proceeding without disable rule $ru" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+                    }
+                }
+        }
+        if($res -ne $null -and $res -ne "" -and $res -ne " "){
+            $affchoice=affinity-rdm-check-choice -resultarray $res -LogFile $LogFile
+            if($affchoice.Count -gt 0){
+                [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $affchoice as input" | Out-File $LogFile -Append
+                if($affchoice -eq "q"){
+                    [string]$Msg = "Enabling the rule(s) and Powering On the vm(s) before quitting" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                    $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -eninput "enable" -muinput "unmute" -arraypath $arraypath -Creds $Creds -cn $cluname -vmHostname $hname -compareinput "compare" -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                    Exit
+                }
+                $affout=affinity-rdm-check-choice1 -vCenter1 $vCenter1 -Credential $Creds -resultarray $res -inputarray $affchoice -path $vapath -LogFile $LogFile
+            }
+        }
+    }
+}
+$count2 ++
+}
+
+########################RDM################################
+$vnames=(Get-VMHost -Name $hname | Get-VM).Name
+$res1 = @()
+$count4 = 1
+foreach($vname in $vnames){
+    $arvmcheck1 = Get-VM -Name $vname -ErrorAction SilentlyContinue
+    if($arvmcheck1 -ne $null){
+        $rdm=Get-VM -Name $vname | Get-HardDisk -Disktype RawPhysical | select -ExpandProperty Parent | Sort-Object -Property VMID -Unique
+        if($rdm -ne $null -and $rdm -ne "" -and $rdm -ne " "){
+            $res1 += [pscustomobject] @{
+                Choice = $count4
+                Vmname = $rdm.Name
+                PowerState = $rdm.PowerState
+                Hostname = $hname
+            }
+            $count4 ++
+        }
+    }
+} 
+[string]$Msg = "List of vms residing under the host $hname with RDM attached" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+if($res1 -ne $null -and $res1 -ne "" -and $res1 -ne " "){
+    $res1 | ft | Out-String | write-host
+    $res1 | Out-File $LogFile -Append
+    $affchoice1=affinity-rdm-check-choice -resultarray $res1 -LogFile $LogFile
+    if($affchoice1.Count -gt 0){
+        [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $affchoice1 as input" | Out-File $LogFile -Append
+        if($affchoice1 -eq "q"){
+            [string]$Msg = "Enabling the rule(s) and Powering On the vm(s) before quitting" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+            $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -eninput "enable" -muinput "unmute" -arraypath $arraypath -Creds $Creds -vmHostname $hname -compareinput "compare" -cn $cluname -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+            Exit
+        }
+        $affout1=affinity-rdm-check-choice1 -vCenter1 $vCenter1 -Credential $Creds -resultarray $res1 -inputarray $affchoice1 -path $vrpath -LogFile $LogFile
+    }
+}
+else{
+    [string]$Msg = "No vm(s) under the host $hname with RDM attached" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+}
+return $hname
+}
+
+###################### Choosing single host #######################
+function single-host {
+param(
+[Parameter(Mandatory=$true)]
+[Array] $hlist,
+[Parameter(Mandatory=$true)]
+[string] $hostout)
+
+if($hostout.Count -eq 1){ 
+    foreach($hl in $hlist){
+        if($hl.Choice -eq $hostout){
+            $hn=$hl.Host
+        }
+    }
+}
+return $hn
+}
+
+################## List of available hosts of cluster $cn ##########################
+function list-hosts {
+param(
+[Parameter(Mandatory=$true)]
+[string] $cn)
+
+[array]$hos=Get-Cluster -Name $cn |get-VMHost | get-view
+$count1 = 1
+$data1 = @()
+foreach($ho in $hos){
+    $up=$ho | select @{N="uptime";E={(get-date).ToUniversalTime()-($_.summary.runtime.boottime).touniversaltime()}}
+    $ut=$up.uptime
+    $uptime="$($ut.days) Days, $($ut.Hours) Hours, $($ut.Minutes) Minutes, $($ut.Seconds) Seconds"
+        $data1 += [PSCustomObject]@{
+            Choice = $count1
+            Host = $ho.Name
+            Uptime = $uptime
+        } 
+    $count1 ++
+}
+return $data1
+}
+
+############ Validations ####################
+function ha-drs {
+param(
+[Parameter(Mandatory=$true)]
+[string] $body)
+
+Add-Type -AssemblyName PresentationCore,PresentationFramework
+$ButtonType = [System.Windows.MessageBoxButton]::YesNo
+$MessageboxTitle = "Validations"
+$Messageboxbody = "$body"
+$MessageIcon = [System.Windows.MessageBoxImage]::Warning
+#$Messageboxoptions = [System.Windows.MessageBoxOptions]::DefaultDesktopOnly
+[System.Windows.MessageBox]::Show($Messageboxbody,$MessageboxTitle,$ButtonType,$messageicon)
+}
+
+################Appending the vm(s) info into csv file Pre and Post Reboot#################
+function pre-post-checking{
+param(
+[Parameter(Mandatory=$true)]
+[string] $hostCluster,
+[Parameter(Mandatory=$true)]
+[string] $Outfile)
+
+$allVMs = (Get-Cluster "$hostCluster" | Get-VM)
+$a = @("Vmname","PowerState","Hostname","Cpu","Memory","IPAddress","DnsName","OS","NumNICs")
+$nicscount=@()
+$hdscount=@()
+foreach($vmn in $allVMs){
+    $provmcheck = Get-VM -Name $vmn -ErrorAction SilentlyContinue
+    if($provmcheck -ne $null){
+        $nicscount += (Get-VM -Name $vmn | Get-NetworkAdapter).count
+        $hdscount += (Get-VM -Name $vmn | Get-HardDisk).count
+    }
+}
+$nicsmax=($nicscount | measure -Maximum).Maximum
+$a1nac=@()
+for($i=1; $i -le $nicsmax; $i++){
+    $nac="Network adapter $i"
+    $a1nac += $nac
+    
+}
+$a += $a1nac
+$a += "NumHDs"
+$hdsmax=($hdscount | measure -Maximum).Maximum
+$a2hdc=@()
+for($i=1; $i -le $hdsmax; $i++){
+    $hdc="Hard disk $i"
+    $a2hdc += $hdc
+    
+}
+$a += $a2hdc
+("" | select $a | export-csv $Outfile -NoTypeInformation)
+$d= Import-csv $Outfile
+$headers = ($d | Get-Member -MemberType NoteProperty).Name
+foreach($vm in $allVMs){
+    $provmcheck1 = Get-VM -Name $vm -ErrorAction SilentlyContinue
+    if($provmcheck1 -ne $null){
+        $vm1=get-VM -Name $vm
+        $d.Vmname =$vm1.Name
+        $d.PowerState = $vm1.PowerState
+        $d.Hostname = $vm1.VMHost
+        $d.Cpu = $vm1.NumCpu
+        $d.Memory = $vm1.MemoryGB
+        $d.IPAddress = $vm1.Guest.IPAddress[0]
+        $d.DnsName = $vm1.ExtensionData.Guest.Hostname
+        $d.OS = $vm1.Guest.OSFullName
+        $nicscount1 = ($vm1 | Get-NetworkAdapter).count
+        $NetworkAdapters = $vm1 | Get-NetworkAdapter | select Name,NetWorkName
+        $d.NumNICs = $nicscount1
+            foreach($a1 in $a1nac){
+                foreach($na in $NetworkAdapters){
+                    $naname = $na.Name
+                    if($naname -eq $a1){
+                        $naname1 = $na.NetworkName
+                        break
+                    }
+                    else{
+                        $naname1 = ""
+                    }
+                }
+                $d.$a1 = $naname1
+            }
+        $hdscount1 = ($vm1 | Get-HardDisk).count
+        $HardDisks = $vm1 | Get-HardDisk | select Name,Filename
+        $d.NumHDs = $hdscount1
+            foreach($a2 in $a2hdc){
+                foreach($hd in $HardDisks){
+                    $hdname = $hd.Name
+                    if($hdname -eq $a2){
+                        $hdname1 = $hd.Filename
+                        break
+                    }
+                    else{
+                        $hdname1 = ""
+                    }
+                }
+                $d.$a2 = $hdname1
+            }
+        $d | export-csv $Outfile -Append -NoTypeInformation
+    }
+}
+return "OK"
+}
+
+#############Choosing Cluster or host choice######################
+function cluster-host-choice{
+param(
+[Parameter(Mandatory=$true)]
+[array] $resultarray1,
+[Parameter(Mandatory=$true)]
+[string] $cluorho,
+[string] $Logfile)
+
+Write-host "
+#####################################################################
+#INPUT REQUIRED                                                     #
+#If you want to proceed provide listed choice as the input as ex: 1 #
+#If you want to abort/exit the script provide input as ex: q        #
+#####################################################################
+" -ForegroundColor Yellow
+$incre1=1
+[string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Enter choice of $cluorho : ex(1 or q) " | Out-File $LogFile -Append
+while($incre1){
+    $in = $(Write-Host "Enter choice of $cluorho : ex(1 or q) "  -ForegroundColor Magenta -NoNewLine; Read-Host)
+    if($in -eq "q"){
+        $returnout1=$in
+        break
+    }
+    elseif($in -match "^\d+$"){
+        [int]$number=$in
+        $resultarray1choice=$resultarray1.Choice
+        if($resultarray1choice -contains $number){
+            $returnout1=$number
+            break
+        }
+        else{
+            Write-host "Entered input is invalid.Please enter correct input.."
+            $incre1 ++
+            continue
+        }
+    }
+    else{
+        if($in -ne $null -and $in -ne "" -and $in -ne " "){
+            Write-host "Entered input is invalid.Please enter correct input.."
+        }
+        else{
+            Write-host "Entered input is empty.Please enter correct input.."
+        }
+        $incre1 ++
+        continue
+    }
+}
+return $returnout1
+}
+
+###### CREATING FILES AND FOLDERS ######
+$D = (Get-Date -UFormat %Y_%m_%d_%H_%M_%S)
+$myfolder="C:\ESXI_REBOOT_ACTIVITY"
+$fname="$myfolder\ESXIFILES"
+$fname1="$myfolder\PRE_POST_HOSTREBOOT"
+$fname2="$myfolder\ESXILOGS"
+$folders=@($fname,$fname1,$fname2)
+$rpath="$fname\RuleswithAffinity.txt"
+$vapath="$fname\VmswithAffinity.txt"
+$vrpath="$fname\VmswithRdm.txt"
+$mmpath="$fname\VmswithMm.txt"
+$mmpath1="$fname\VmswithMm1.txt"
+$preVMList="$fname1\" + $D + "_preVMList.csv"
+$postVMList="$fname1\" + $D + "_postVMList.csv"
+$LogFile="$fname2\" + $D + "_EsxiLogs"
+$paths=@($rpath,$vapath,$vrpath,$mmpath,$mmpath1)
+$paths1=@($preVMList,$postVMList)
+foreach($folder in $folders){
+    if($folder -eq $fname){
+        if(Test-Path -Path $folder){
+            foreach($p in $paths){
+                if(Test-Path -Path $p){
+                    Remove-Item -Path $p
+                }
+            }
+        }
+        else{
+            $dir=New-Item -Path $folder -ItemType "directory"
+        }
+    }
+    else{
+        if(!(Test-Path -Path $folder)){
+            $dir2=New-Item -Path $folder -ItemType "directory"
+        }
+    }
+}
+###################LOGS###################
+Function Write-Logs {
+	Param (
+	[string]$Msg,
+	[string]$MsgType,
+	[string]$LogFile)
+
+If($MsgType -eq "INFO") {[string]$MsgColor = "Green"}
+If($MsgType -eq "INFO1") {[string]$MsgColor = "Yellow"} 
+If($MsgType -eq "ERROR") {[string]$MsgColor = "Red"}
+
+[string]$LogMsg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - $Msg"
+$LogMsg | out-file $LogFile -Append
+If($MsgType -eq "INFO2"){
+    Write-Host "$LogMsg"
+}
+else{
+    Write-Host "$LogMsg" -ForegroundColor $MsgColor
+}
+}
+
+#######################################################
+Write-host "Collecting execution logs in the path $Logfile" -ForegroundColor Green
+[string]$Msg = "***************************************************************" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+[string]$Msg = "SCRIPT EXECUTED ON : $(Get-Date -Format 'yyyyMMdd HH:mm:ss')" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+[string]$Msg = "***************************************************************" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+
+#### Get vCenter and solarwinds credentials ####
+[string]$Msg = "Please provide DS Admin account credentials" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+$Creds = (Get-Credential -Message "Please provide DS Admin account credentials")
+if($Creds){
+$username=$env:USERNAME
+$ahisname = $(whoami)
+$dsname=$Creds.UserName
+$scriptRanFrom = $(hostname)
+[string]$Msg = "User : $username" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+[string]$Msg = "AHIS ID : $ahisname" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+[string]$Msg = "DS Admin ID : $dsname" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+[string]$Msg = "Sript Ran From : $scriptRanFrom" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+# Importing VMware automation pssnapin
+Import-Module VMware.VimAutomation.Core
+If("$?" -eq "True") {
+    [string]$Msg = "VMWare.VimAutomation.Core module is imported successfully" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+
+
+###### disconnect from any vcenter if already connected ######
+if($global:defaultviserver) { Disconnect-VIServer * -confirm:$false }
+
+####### Get vCenter Name #######
+$vCenter = $(Write-Host "Enter vCenter FQDN: " -ForegroundColor Magenta -NoNewLine; Read-Host)
+
+####### Connect to vCenter ######
+$vCenterConnect = (Connect-VIServer $vCenter -Credential $Creds -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+$vCenterConnectStatus = $vCenterConnect.IsConnected
+If($vCenterConnectStatus -eq "True") {
+[string]$Msg = "Connected to vCenter $vCenter" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+####### Listing all Clusters in vCenter $vCenter and choosing one cluster ########
+$clusters=Get-Cluster | select -Property Name,HAEnabled,DrsEnabled
+$count = 1
+$data = @()
+foreach($cluster in $clusters){
+    $data += [PSCustomObject]@{ 
+            Choice = $count
+            Cluster_Name = $cluster.Name
+            HA_Enabled = $cluster.HAEnabled
+            DRS_Enabled = $cluster.DrsEnabled
+    } 
+    $count ++
+}
+
+[string]$Msg = "List of available clusters in vCenter $vCenter" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+if($data -ne $null -and $data -ne "" -and $data -ne " "){
+$data | ft
+$data | Out-File $LogFile -Append
+}
+else{
+    [string]$Msg = "No Cluster(s) present in vCenter $vCenter" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+    Exit
+}
+
+#############Calling function to select cluster##################
+$clusterout=cluster-host-choice -resultarray1 $data -cluorho "cluster" -Logfile $LogFile
+if($clusterout.Count -gt 0){ 
+    [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $clusterout as input" | Out-File $LogFile -Append
+    if($clusterout -eq "q"){
+        Exit
+    }
+    foreach($d in $data){
+        if($d.Choice -eq $clusterout){
+            $cn=$d.Cluster_Name
+            break
+        }
+    }
+    [string]$Msg = "Performing Reboot action on hosts present in the selected cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+    [string]$Msg = "Taking backup of vm(s) info before performing reboot activity.Please wait.." ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+    $prereboot=pre-post-checking -hostCluster $cn -Outfile $preVMList
+    if($prereboot -eq "OK"){
+        [string]$Msg = "Successfully have the backup of vm(s) info before performing reboot activity in the path $preVMList" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+
+    }
+        [string]$Msg = "Checking HA and DRS of cluster $cn enabled or not" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+        $clus = Get-Cluster -name $cn
+        $ha = $clus.HAEnabled
+        $drs = $clus.DRSEnabled
+        if ($ha -eq $true -and $drs -eq $true){
+            [string]$Msg = "Both HA and DRS of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+            $hadrsinput="noc"
+        } elseif ($ha -eq $true -or $drs -eq $true){
+            if ($ha -eq $true){
+                $con="HA enabled but not DRS of cluster $cn.Do you want to enable DRS ?"
+                [string]$Msg = "HA of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                [string]$Msg = "Drs of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Please validate your response in popup" -ForegroundColor Cyan
+                $result = ha-drs -body $con
+                if ($result -eq "Yes"){
+                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                    $a=Set-Cluster -Cluster $cn -DrsEnabled:$true -confirm:$false
+                    $clus1 = Get-Cluster -name $cn
+                    $drs1=$clus1.DrsEnabled
+                    if ($drs1 -eq $true){
+                        [string]$Msg = "DRS of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        $hadrsinput="drs" 
+                    } else {
+                        [string]$Msg = "DRS of cluster $cn not enabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $quit=compare-files -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }
+                } else {
+                    Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                    [string]$Msg = "Proceeding without enabling DRS of cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+                    $hadrsinput="noc"
+                }
+            } else {
+                $con="DRS enabled but not HA of cluster $cn.Do you want to enable HA ?"
+                [string]$Msg = "DRS of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                [string]$Msg = "HA of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Please validate your response in popup" -ForegroundColor Cyan
+                $result = ha-drs -body $con
+                    if ($result -eq "Yes"){
+                        Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                        $a=Set-Cluster -Cluster $cn -HAEnabled:$true -confirm:$false
+                        $clus1 = Get-Cluster -name $cn
+                        $ha1=$clus1.HAEnabled
+                        if ($ha1 -eq $true){
+                            [string]$Msg = "HA of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                            $hadrsinput="ha"
+                         } else {
+                            [string]$Msg = "HA of cluster $cn not enabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                            $quit=compare-files -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                            Exit
+                         }
+                    } else {
+                        Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                        [string]$Msg = "Proceeding without enabling HA of cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+                        $hadrsinput="noc"
+                    }
+            }
+        } else {
+            $con="Both HA and DRS of cluster $cn disabled.Do you want to enable both HA and DRS ?"
+            [string]$Msg = "Both HA and DRS of cluster $cn disabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+            Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Please validate your response in popup" -ForegroundColor Cyan
+            $result = ha-drs -body $con
+            if ($result -eq "Yes"){
+                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                $a=Set-Cluster -Cluster $cn -DrsEnabled:$true -HAEnabled:$true -confirm:$false
+                $clus1 = Get-Cluster -name $cn
+                $drs1=$clus1.DrsEnabled
+                $ha1=$clus1.HAEnabled
+                if ($ha1 -eq $true -and $drs1 -eq $true){
+                    [string]$Msg = "Both HA and DRS of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                    $hadrsinput="both"
+                } elseif ($ha1 -eq $true -or $drs1 -eq $true){
+                    if ($ha1 -eq $true){
+                        [string]$Msg = "HA of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        [string]$Msg = "DRS of cluster $cn not enabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $hadrsinput="ha"
+                        $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    } else {
+                        [string]$Msg = "DRS of cluster $cn enabled" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        [string]$Msg = "HA of cluster $cn not enabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+
+                        $hadrsinput="drs"
+                        $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }
+                } else {
+                    [string]$Msg = "Both HA and DRS of cluster $cn not enabled" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                    $quit=compare-files -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                    Exit
+                }
+            } else {
+                Write-host "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Thanks for your response" -ForegroundColor Green
+                [string]$Msg = "Proceeding without enabling HA and DRS of cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO2 -LogFile $LogFile
+                $hadrsinput="noc"
+            }
+        }
+    
+
+    $hostslist=list-hosts -cn $cn
+    [string]$Msg = "List of available hosts in cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+    if($hostslist -ne $null -and $hostslist -ne "" -and $hostslist -ne " "){
+        $hostslist | ft
+        $hostslist | out-file $LogFile -Append
+    }
+    else{
+        [string]$Msg = "No host(s) present in cluster $cn" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+        $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+        Exit
+    }
+    $hostout=cluster-host-choice -resultarray1 $hostslist -cluorho "host" -Logfile $LogFile
+    if($hostout.Count -gt 0){
+        [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $hostout as input" | Out-File $LogFile -Append
+        if($hostout -eq "q"){
+            $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+            Exit
+        }
+        $singlehost=single-host -hlist $hostslist -hostout $hostout
+        [string]$Msg = "Performing Reboot action on the selected host $singlehost" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+        ############# Calling function to Mute alerts ####################
+        $mutealerts=hadrs-enable-unmute-compare -muinput "mute" -Creds $Creds -cn $cn -vmHostname $singlehost -allnodesFile $allnodesFile -hadrsinput $hadrsinput -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+        $aff=affinity-rdm-check -vCenter1 $vCenter -Creds $Creds -cluname $cn -hname $singlehost -rpath $rpath -vapath $vapath -vrpath $vrpath -preVMList $preVMList -postVMList $postVMList -hadrsinput $hadrsinput -LogFile $LogFile
+        $hostreboot=host-reboot -vCenter1 $vCenter -Creds $Creds -cn $cn -vmHostname $aff -rpath $rpath -vapath $vapath -vrpath $vrpath -mmpath $mmpath -mmpath1 $mmpath1 -preVMList $preVMList -postVMList $postVMList -hadrsinput $hadrsinput -LogFile $LogFile
+        for($i=1; $i -lt $hostslist.Count; $i++){
+            $output=yes-or-no-options -read "proceed" -Logfile $LogFile
+            if($output -ne $null -and $output -ne "" -and $output -ne " "){
+                [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $output as input" | Out-File $LogFile -Append
+                if($output -eq "q"){
+                    $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                    Exit
+                }
+                elseif($output -eq "y"){
+                    $hostslist1=list-hosts -cn $cn
+                    [string]$Msg = "*******PROCEEDING WITH NEXT HOST IN THE CLUSTER $cn*******" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                    [string]$Msg = "List of available hosts in cluster $cn" ; Write-Logs -Msg $Msg -MsgType INFO1 -LogFile $LogFile
+                    if($hostslist1 -ne $null -and $hostslist1 -ne "" -and $hostslist1 -ne " "){
+                        $hostslist1 | ft
+                        $hostslist1 | Out-File $LogFile -Append
+                    }
+                    else{
+                        [string]$Msg = "No host(s) present in cluster $cn" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile
+                        $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        Exit
+                    }
+                    $hostout1=cluster-host-choice -resultarray1 $hostslist1 -cluorho "host" -Logfile $LogFile
+                    if($hostout1.Count -gt 0){
+                        [string]$Msg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - Selected $hostout1 as input" | Out-File $LogFile -Append
+                        if($hostout1 -eq "q"){
+                            $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                            Exit  
+                        }
+                        $singlehost1=single-host -hlist $hostslist1 -hostout $hostout1
+                        [string]$Msg = "Performing Reboot action on the selected host $singlehost1" ; Write-Logs -Msg $Msg -MsgType INFO -LogFile $LogFile
+                        ############# Calling solarwinds Mute alerts function####################
+                        $mutealerts1=hadrs-enable-unmute-compare -muinput "mute" -Creds $Creds -cn $cn -vmHostname $singlehost1 -allnodesFile $allnodesFile -hadrsinput $hadrsinput -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                        $aff1=affinity-rdm-check -vCenter1 $vCenter -Creds $Creds -cluname $cn -hname $singlehost1 -rpath $rpath -vapath $vapath -vrpath $vrpath -preVMList $preVMList -postVMList $postVMList -hadrsinput $hadrsinput -LogFile $LogFile
+                        $hostreboot1=host-reboot -vCenter1 $vCenter -Creds $Creds -cn $cn -vmHostname $aff1 -rpath $rpath -vapath $vapath -vrpath $vrpath -mmpath $mmpath -mmpath1 $mmpath1 -preVMList $preVMList -postVMList $postVMList -hadrsinput $hadrsinput -LogFile $LogFile
+                        if($i -eq $hostslist.Count-1){
+                            $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile  
+                        }
+                    }
+                }
+                elseif($output -eq "n"){
+                    $quit=hadrs-enable-unmute-compare -hdinput "disable" -hadrsinput $hadrsinput -compareinput "compare" -cn $cn -preVMList $preVMList -postVMList $postVMList -LogFile $LogFile
+                    Exit
+                }
+            }
+        }
+    }
+}
+} else { [string]$Msg = "Failed to connect to the vCenter $vCenter because of invalid credentials or invalid vCenter FQDN" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile } 
+} else { [string]$Msg = "VMWare.VimAutomation.Core module is imported Failed. Please check if PowerCli is installed on this system" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile }
+} else { [string]$Msg = "Credentials not provided" ; Write-Logs -Msg $Msg -MsgType ERROR -LogFile $LogFile }

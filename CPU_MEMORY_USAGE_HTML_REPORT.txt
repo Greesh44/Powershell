@@ -1,0 +1,160 @@
+$global:reachable_count=0
+$global:notreachable_count=0
+
+function Get-ComputerStats {
+    param(
+    [Parameter(Mandatory=$true, Position=0,
+    ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNull()]
+    [string[]]$ComputerName
+    )process {
+    foreach ($c in $ComputerName) {
+
+        if ( Test-Connection -ComputerName $c -Count 1 -ErrorAction SilentlyContinue ) {
+
+            $global:reachable_count+=1
+
+            $avg = Get-WmiObject win32_processor -computername $c |
+                Measure-Object -property LoadPercentage -Average |
+                Foreach {$_.Average}
+            $mem = Get-WmiObject win32_operatingsystem -ComputerName $c |
+                Foreach {"{0:N2}" -f ((($_.TotalVisibleMemorySize - $_.FreePhysicalMemory)*100)/ $_.TotalVisibleMemorySize)}
+            $free = Get-WmiObject Win32_Volume -ComputerName $c -Filter "DriveLetter='c:'" |
+                Foreach {"{0:N2}" -f (($_.FreeSpace / $_.Capacity)*100)}
+            #new-object psobject -prop @{ # Work on PowerShell V2 and below
+            if($?){
+                [pscustomobject] [ordered] @{ # Only if on PowerShell V3
+                    ComputerName = $c
+                    Pinging="Pinging"
+                    AverageCpu = $avg
+                    MemoryUsage = $mem
+                    PercentFree = $free
+                }
+
+            }
+            else{
+                [pscustomobject] [ordered] @{ # Only if on PowerShell V3
+                    ComputerName = $c
+                    Pinging="Pinging"
+                    AverageCpu = ""
+                    MemoryUsage = ""
+                    PercentFree = ""
+            }
+        }
+    }
+    else{
+        $global:notreachable_count+=1
+        [pscustomobject] [ordered] @{ # Only if on PowerShell V3
+        ComputerName = $c
+        Pinging="Not Reachable"
+        AverageCpu = ""
+        MemoryUsage = ""
+        PercentFree = ""
+        }
+
+        }
+    }
+}
+}
+#$server=get-content -Path ""
+$server=@("localhost","local","127.0.0.1")
+$out=$server | Get-ComputerStats
+$out | Export-Csv -Path "" -NoTypeInformation
+$z="<html>
+<head>
+<style>
+table{
+font-size:12px
+}
+#Header{font-family:'Trebuchet MS', Arial, Helvetica, sans-serif;width:100%;border-collapse:collapse;}
+#Header td, #Header th {font-size:14px;border:1px solid #DDDDDD;padding:5px 7px 5px 7px;}
+#Header th {font-size:14px;text-align:left;padding-top:10px;padding-bottom:10px;background-color:#D6D6D6;color:blue;}
+#Header tr.alt td {color:#000;background-color:#FAF2D3;}
+#Header1{font-family:'Trebuchet MS', Arial, Helvetica, sans-serif;border-collapse:collapse;}
+#Header1 td, #Header th {font-size:14px;border:1px solid #DDDDDD;padding:5px 7px 5px 7px;}
+#Header1 th {font-size:14px;text-align:left;padding-top:10px;padding-bottom:10px;background-color:#D6D6D6;color:blue;}
+#Header1 tr.alt td {color:#000;background-color:#FAF2D3;}
+</style>
+</head>
+<body><div class ='col-md-12'>
+<h3></h3>
+<div class='col-md-12'>
+<center>
+<h1 style='color:darkblue'>CPU,Memory and Disk Utilization</h1>
+<center>
+
+
+
+<h3 style='text-align: left;'><b>$(get-date -Format 'dddd, MMMM dd, yyyy hh:mm:ss tt')</b></h3>
+<h3 style='color:orange'>Server Reachable Details</h3>
+<Table id=Header1>
+<thead style='color:blue;'>
+<tr>
+<th>Total Server</th>
+<th>Server Reachable</th>
+<th>Server Not Reachable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$($server.count)</td>
+<td>$($reachable_count)</td>
+<td>$($notreachable_count)</td>
+</tr></tbody>
+</table>
+<br><br>
+
+
+
+
+
+<Table border=1 cellpadding=0 cellspacing=0 id=Header>
+<thead style='color:blue;'>
+<tr>
+<th> Server Name</th>
+<th> Ping Status</th>
+<th> CPU Utilization</th>
+<th> Memory Utilization</th>
+<th> Disk Freespace</th>
+</tr>
+</thead>
+<tbody>"
+$z += $out | %{
+if($_.pinging -eq "Not Reachable"){
+"<tr style='background-color:#F70E02;color:white;'>"
+}
+else{
+"
+<tr>"
+}
+"
+<td>$($_.ComputerName)</td>
+<td>$($_.Pinging)</td>
+<td>$($_.AverageCpu)</td>
+"
+if($_.MemoryUsage -ge 80 -and $_.MemoryUsage -le 90){
+"<td style='background-color:#FFFF00;color:Black;'>$($_.MemoryUsage ) </td>"
+}
+elseif($_.MemoryUsage -gt 90 ){
+"<td style='background-color:#F70E02;color:Black;'>$($_.MemoryUsage ) </td>"
+}
+else{
+"
+<td>$($_.MemoryUsage ) </td>"
+}
+"
+<td>$($_.PercentFree)</td>
+</tr>"
+}
+$z += "<tbody>
+</table>
+</div></div>
+</body>
+</html>
+"
+
+
+
+
+
+$z | Out-File "C:\Users\output1.html"
