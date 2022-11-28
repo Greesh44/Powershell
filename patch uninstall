@@ -1,0 +1,246 @@
+<#The script will uninstall the hotfix as per input Hotfixid#>
+
+try{
+$ErrorActionPreference = "Stop"
+
+##################################
+# Disclaimer - Start             #
+##################################
+Write-Host "
+#####################################################################################
+# This script is designed for Fetching Server Inventory details from target servers #
+# Three inputs are required to the script                                           #
+#    InputFile: Eg: c:\users\test\filename.txt                                      #
+#    Hotfixid: Eg: KB123456                                                         #
+#    Credentials: Domain credentials while executing                                #
+#####################################################################################
+" -ForegroundColor Yellow ; Pause
+
+Function Write-Logs {
+	Param (
+[string]$msg,
+[string]$msgtype,
+[string]$logfile
+	)
+If($MsgType -eq "ERROR") {[string]$MsgColor = "RED"}
+If($MsgType -eq "INFO") {[string]$MsgColor = "GREEN"}
+[string]$LogMsg = "$(Get-Date -Format 'yyyyMMdd HH:mm:ss') - $MsgType - $Msg"
+$LogMsg|Out-File -FilePath $logfile -Append
+Write-Host "$logmsg" -ForegroundColor $Msgcolor
+}
+
+####### CREATING VARIABLES #######
+$global:reachable_count=0
+$global:notreachable_count=0
+$global:action_perfomed=0
+$outputdirectory="c:\temp"
+$outputpath="$outputdirectory\UninstallHotfixes"
+$date = Get-Date -Format 'yyyy_MM_dd'
+$Logfile="$outputpath\" + $date + "_Hotfix Log"
+$outhtml="$outputpath\" + $date + "_Hotfix_Uninstall_Report.html"
+$outcsv="$outputpath\" + $date + "_HOtfix_Uninstall_Report.csv"
+
+####### File Check ########
+
+if(!(test-path $outputdirectory)){
+$createtemp=new-item -Path $outputdirectory -ItemType "directory" 
+     if(test-path -Path $outputdirectory){
+        if(!(test-path -Path $outputpath)){
+        $createsi=new-item -Path $outputpath -ItemType "directory"
+             if(!(test-path -path $outputpath)){
+             [string] $msg="Directory $outputpath not found"; Write-Logs -Msg $msg -MsgType ERROR -LogFile $ErrorLogFile
+             }
+        }
+
+     }
+}
+else{
+        if(!(test-path -Path $outputpath)){
+        $createsi=new-item -Path $outputpath -ItemType "directory" 
+             if(!(test-path -path $outputpath)){
+             [string] $msg="Directory $outputpath not found"; Write-Logs -Msg $msg -MsgType ERROR -LogFile $ErrorLogFile
+             }
+        }
+     
+}
+ 
+ #################### Input path #########################################
+
+<#$count=1
+$inputfile=$null
+while($count){
+    $inputpath=$(Write-Host "`n Please provide the input filepath: : ex(c:\users.txt or Exit) :  " -ForegroundColor Yellow -NoNewline; Read-Host )
+    if(![string]::IsNullOrWhiteSpace($inputpath)){
+        if($inputpath -eq "Exit"){
+        throw "Exiting the script"
+        break
+        }
+        elseif($inputpath -like "*.txt"){
+            if(!(test-path $inputpath)){
+                Write-host "`n Entered input is invalid.Please enter correct input.."
+                $count ++
+                continue
+            }
+            else{
+            $inputfile=$inputpath
+            write-host "Proceeding with the inputfile $inputfile" -ForegroundColor Green
+            break
+            }
+        }
+        else{
+        }
+        $count ++
+        continue
+    }
+
+}#>
+
+ #################################################
+ Function GUI_TextBox ($Input_Type){
+### Creating the form with the Windows forms namespace
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'Enter the Hotfix Information' ### Text to be displayed in the title
+$form.Size = New-Object System.Drawing.Size(300,525) ### Size of the window
+$form.StartPosition = 'CenterScreen'  ### Optional - specifies where the window should start
+$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedToolWindow  ### Optional - prevents resize of the window
+$form.Topmost = $true  ### Optional - Opens on top of other windows
+
+### Adding an OK button to the text box window
+$OKButton = New-Object System.Windows.Forms.Button
+$OKButton.Location = New-Object System.Drawing.Point(150,450) ### Location of where the button will be
+$OKButton.Size = New-Object System.Drawing.Size(80,23) ### Size of the button
+$OKButton.Text = 'OK' ### Text inside the button
+$OKButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.AcceptButton = $OKButton
+$form.Controls.Add($OKButton)
+
+### Adding a Cancel button to the text box window
+$CancelButton = New-Object System.Windows.Forms.Button
+$CancelButton.Location = New-Object System.Drawing.Point(70,450) ### Location of where the button will be
+$CancelButton.Size = New-Object System.Drawing.Size(80,23) ### Size of the button
+$CancelButton.Text = 'Cancel' ### Text inside the button
+$CancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+$form.CancelButton = $CancelButton
+$form.Controls.Add($CancelButton)
+
+### Putting a label above the text box
+$label = New-Object System.Windows.Forms.Label
+$label.Location = New-Object System.Drawing.Point(10,10) ### Location of where the label will be
+$label.AutoSize = $True
+$Font = New-Object System.Drawing.Font("Arial",12,[System.Drawing.FontStyle]::Bold) ### Formatting text for the label
+$label.Font = $Font
+$label.Text = $Input_Type ### Text of label, defined by the parameter that was used when the function is called
+$label.ForeColor = 'Red' ### Color of the label text
+$form.Controls.Add($label)
+
+### Inserting the text box that will accept input
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Location = New-Object System.Drawing.Point(10,40) ### Location of the text box
+$textBox.Size = New-Object System.Drawing.Size(275,400) ### Size of the text box
+$textBox.Multiline = $true ### Allows multiple lines of data
+$textbox.AcceptsReturn = $true ### By hitting enter it creates a new line
+$textBox.ScrollBars = "Vertical" ### Allows for a vertical scroll bar if the list of text is too big for the window
+$form.Controls.Add($textBox)
+
+$form.Add_Shown({$textBox.Select()}) ### Activates the form and sets the focus on it
+$result = $form.ShowDialog() ### Displays the form 
+ 
+### If the OK button is selected do the following
+if ($result -eq [System.Windows.Forms.DialogResult]::OK)
+{
+    ### Removing all the spaces and extra lines
+    $x = $textBox.Lines | Where{$_} | ForEach{ $_.Trim() }
+    ### Putting the array together
+    $array = @()
+    ### Putting each entry into array as individual objects
+    $array = $x -split "`r`n"
+    ### Sending back the results while taking out empty objects
+    Return $array | Where-Object {$_ -ne ''}
+}
+ 
+### If the cancel button is selected do the following
+if ($result -eq [System.Windows.Forms.DialogResult]::Cancel)
+{
+    Write-Host "User Canceled" -BackgroundColor Red -ForegroundColor White
+    Exit
+}
+}
+
+ ############### UNINSTALL PATCH #################
+function patch_uninstall{
+param([string] $computername,
+[array] $Hotfixid,
+[System.Management.Automation.PSCredential] $credential
+)
+
+foreach($hotfix in $Hotfixid){
+$hotfixes=Get-WmiObject -ComputerName $computername -Credential $credential -Class Win32_QuickFixEngineering|?{$_.hotfixid -eq $Hotfix}
+if(![string]::IsNullOrWhiteSpace($hotfixes)) {
+    $hotfixID = $Hotfix.Replace("KB","")
+    Write-host "`n Found the hotfix KB" + $HotfixID
+    Write-Host "`n Uninstalling the hotfix"
+    <#$UninstallString = "cmd.exe /c wusa.exe /uninstall /KB:$hotfixID /quiet /norestart"
+    start-sleep 5
+    ([WMICLASS]"\\$computername\ROOT\CIMV2:win32_process").Create($UninstallString) | out-null          
+    while (@(Get-Process wusa -computername $computername -ErrorAction SilentlyContinue).Count -ne 0) {
+        Start-Sleep 3
+        Write-Host "`n Waiting for update removal to finish ..."
+    }#>
+write-host "`n Completed the uninstallation of $hotfixID"
+}
+else {            
+write-host "`n Given hotfix($hotfix) not found"
+}
+}
+return
+} 
+
+################ CREDENTIAL ######################
+$inputfile="c:\users\bgreeshm-adm\desktop\ip.txt"
+if(test-path -Path $inputfile){
+#$credential=get-credential -Message "Please Enter your domain credentials"
+$servers=Get-Content $inputfile|?{$_.trim() -ne ""}
+if(![string]::IsNullOrWhiteSpace($servers)){
+$out=foreach($item in $servers){
+try{
+    if(![string]::IsNullOrWhiteSpace($item)){
+        if(([bool]($item -as [ipaddress])) -or ($item -like "*.*")){
+        $Hotfixes=$null
+        $Hotfixes = GUI_TextBox "Hotfixes(s):" ### Calls the text box function with a parameter and puts returned input in variable
+        $Hotfixes_Count = $Hotfixes | Measure-Object | % {$_.Count} ### Measures how many objects were inputted
+ 
+        If ($Hotfixes_Count -eq 0){ ### If the count returns 0 it will throw and error
+            Write-Host "Nothing was inputed..." -BackgroundColor Red -ForegroundColor White
+            Return
+        }
+        Else { ### If there was actual data returned in the input, the script will continue
+            Write-Host "Number Of Hotfix's Entered:" $Hotfixes_Count -BackgroundColor Cyan -ForegroundColor Black
+            patch_uninstall -computername $item -Hotfixid $Hotfixes
+
+            ### Here is where you would put your specific code to take action on those computers inputted
+        }
+    }
+    else{
+        throw "Please provide FQDN/IP as a input"
+    }
+   
+}
+}
+catch{
+$errormessage=$_.exception.message
+write-host $errormessage
+}
+}
+$out
+}
+else{
+[string] $msg= "Data not found in the Specified input file path $inputfilepath" ;Write-Logs -Msg $msg -MsgType ERROR -LogFile $ErrorLogFile
+}
+}
+}
+catch{
+$errormessage=$_.exception.message
+write-host $errormessage
+}
