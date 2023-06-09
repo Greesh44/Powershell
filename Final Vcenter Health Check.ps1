@@ -1,9 +1,8 @@
-﻿$user="ds\bgreeshm-admm"
-$pass="b2QYcR\@CtWV"
-$pass1=ConvertTo-SecureString -String "$pass" -AsPlainText -Force -ErrorAction Stop     #Enter the password
-$cred = New-Object System.Management.Automation.PSCredential -ArgumentList $user,$pass1
-$vCenter = "fitvc01.ministryhealth.net"
-$ErrorActionPreference="stop"
+$vuser="administrator@demo.local"
+$pass="Netapp1!"
+$pass1=ConvertTo-SecureString -String $pass -AsPlainText -Force -ErrorAction Stop     #Enter the password
+$cred = New-Object System.Management.Automation.PSCredential -ArgumentList $vuser,$pass1
+$vCenter = "vc1.demo.netapp.com"
 
 ## Script Variables
 $snapshotdays = "3"
@@ -134,7 +133,7 @@ $SnapReport = "<h2>Snapshot Report</h2>" + "No Snapshots older than $($snapshotd
 ## VMHost Alarms
 Write-Host "Checking for active VMware host alarms" -ForegroundColor Green
 $VMHAlarmReport = @()
-$VMHostStatus = (Get-VMHost | Get-View) | Select-Object Name,OverallStatus,ConfigStatus,TriggeredAlarmState
+$VMHostStatus = Get-VMHost | get-view  | Select-Object Name,OverallStatus,ConfigStatus,TriggeredAlarmState
 $HostErrors= $VMHostStatus  | Where-Object {$_.OverallStatus -ne "Green" -and $_.TriggeredAlarmState -ne $null} 
 if ($HostErrors){
 foreach ($hosterror in $HostErrors){
@@ -157,7 +156,7 @@ $VMHAlarms = "<h2>VMHost Alerts</h2>" + "No active alarms for VMware host's"
 }
 
 ## VM Alarms
-Write-Host "Checking for active VM alarms" -ForegroundColor Green
+<#Write-Host "Checking for active VM alarms" -ForegroundColor Green
 $VMAlarmReport = @()
 $VMStatus = (Get-VM | Get-View) | Select-Object Name,OverallStatus,ConfigStatus,TriggeredAlarmState
 $VMErrors = $VMStatus  | Where-Object {$_.OverallStatus -ne "Green"}
@@ -214,15 +213,17 @@ $DSExport = "<h2>DataStore Under $($datastorePrecFree)% Free Space</h2>" + "No D
 $file = Get-ChildItem $ReportExport\$VCServer-DailyReport.htm -ErrorAction SilentlyContinue
 if (!$file){
 Remove-Item $ReportExport\$VCServer-DailyReport.htm -ErrorAction SilentlyContinue
-    }
+    }#>
 
 ## export results
-ConvertTo-Html -Body "$Heading $VCConnect $VCResponseStatus $vmToolsReport $SnapReport $VMHAlarms $VMAlarmReport $ActiveVCAlert $DSExport"  -Head $HTMLFormat | 
-Out-File $ReportExport\$VCServer-DailyReport.htm
+<#ConvertTo-Html -Body "$Heading $VCConnect $VCResponseStatus $vmToolsReport $SnapReport $VMHAlarms $VMAlarmReport $ActiveVCAlert $DSExport"  -Head $HTMLFormat | 
+Out-File $ReportExport\$VCServer-DailyReport.htm#>
 
+$outhtmlreport="$ReportExport\" + "$VCName" + "_DailyReport.html"
+ConvertTo-Html -Body "$Heading $VCConnect $VCResponseStatus $vmToolsReport $snapreport"  -Head $HTMLFormat | Out-File $outhtmlreport 
 ## Mail variables
-Send-MailMessage -From $FromAddress -To $toaddress -Subject "VMware Daily Report"`
--Body "VMware Daily Report attached"  -SmtpServer $SMTPServer -Attachments $ReportExport\$VCServer-DailyReport.htm
+<#Send-MailMessage -From $FromAddress -To $toaddress -Subject "VMware Daily Report"`
+-Body "VMware Daily Report attached"  -SmtpServer $SMTPServer -Attachments $ReportExport\$VCServer-DailyReport.html#>
 
 ## Report export location 
 Write-Host "Report has been exported to $ReportExport\$VCServer-DailyReport.htm" -ForegroundColor Yellow
